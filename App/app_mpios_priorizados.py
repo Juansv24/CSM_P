@@ -12,6 +12,63 @@ st.set_page_config(
     layout="wide"
 )
 
+def mostrar_paginacion_coincidencias(rec_code):
+    """Mostrar controles de paginación para coincidencias de una recomendación específica"""
+    pagina_actual = st.session_state.get(f'pagina_actual_coincidencias_{rec_code}', 1)
+    total_paginas = st.session_state.get(f'total_paginas_coincidencias_{rec_code}', 1)
+
+    if total_paginas <= 1:
+        return
+
+    st.markdown("---")
+
+    # Crear columnas para centrar la paginación
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        # Crear botones de paginación
+        cols = st.columns([1, 1, 3, 1, 1])
+
+        # Botón anterior
+        with cols[0]:
+            if st.button("◀", disabled=(pagina_actual <= 1), key=f"prev_page_coincidencias_{rec_code}"):
+                st.session_state[f'pagina_actual_coincidencias_{rec_code}'] = max(1, pagina_actual - 1)
+                st.rerun()
+
+        # Números de página como botones
+        with cols[2]:
+            # Mostrar páginas como botones (máximo 5 páginas visibles)
+            paginas_a_mostrar = []
+
+            if total_paginas <= 5:
+                paginas_a_mostrar = list(range(1, total_paginas + 1))
+            else:
+                if pagina_actual <= 3:
+                    paginas_a_mostrar = [1, 2, 3, 4, 5]
+                elif pagina_actual >= total_paginas - 2:
+                    paginas_a_mostrar = list(range(total_paginas - 4, total_paginas + 1))
+                else:
+                    paginas_a_mostrar = list(range(pagina_actual - 2, pagina_actual + 3))
+
+            # Crear mini-columnas para cada número de página
+            mini_cols = st.columns(len(paginas_a_mostrar))
+
+            for i, pagina in enumerate(paginas_a_mostrar):
+                with mini_cols[i]:
+                    if pagina == pagina_actual:
+                        st.markdown(
+                            f"<div style='background: #007bff; color: white; text-align: center; padding: 4px; border-radius: 4px; margin: 2px;'>{pagina}</div>",
+                            unsafe_allow_html=True)
+                    else:
+                        if st.button(str(pagina), key=f"page_coincidencias_{rec_code}_{pagina}"):
+                            st.session_state[f'pagina_actual_coincidencias_{rec_code}'] = pagina
+                            st.rerun()
+
+        # Botón siguiente
+        with cols[4]:
+            if st.button("▶", disabled=(pagina_actual >= total_paginas), key=f"next_page_coincidencias_{rec_code}"):
+                st.session_state[f'pagina_actual_coincidencias_{rec_code}'] = min(total_paginas, pagina_actual + 1)
+                st.rerun()
 
 # Load and cache data
 @st.cache_data
@@ -333,100 +390,244 @@ def main():
         st.markdown("---")
         st.markdown("### 🔍  Análisis detallado de recomendaciones")
 
-        with st.expander("Seleccione una recomendación:", expanded=True):
-            if not high_quality_sentences.empty:
-                # Recommendation selector
-                available_recommendations = high_quality_sentences['recommendation_code'].unique().tolist()
+        if not high_quality_sentences.empty:
+            # Recommendation selector (keep original dropdown functionality)
+            available_recommendations = high_quality_sentences['recommendation_code'].unique().tolist()
 
-                selected_rec_code = st.selectbox(
-                    "",
-                    options=available_recommendations,
-                    format_func=lambda
-                        x: f"{x} - {high_quality_sentences[high_quality_sentences['recommendation_code'] == x]['recommendation_text'].iloc[0][:60]}...",
-                    key="detailed_rec_select"
+            selected_rec_code = st.selectbox(
+                "Seleccione una recomendación:",
+                options=available_recommendations,
+                format_func=lambda
+                    x: f"{x} - {high_quality_sentences[high_quality_sentences['recommendation_code'] == x]['recommendation_text'].iloc[0][:60]}...",
+                key="detailed_rec_select",
+                label_visibility="collapsed"  # <- This hides the label but keeps it for accessibility
+            )
+
+            if selected_rec_code:
+                rec_data = high_quality_sentences[
+                    high_quality_sentences['recommendation_code'] == selected_rec_code].copy()
+
+                # Show recommendation text
+                rec_text = rec_data['recommendation_text'].iloc[0]
+                st.markdown("**Texto de la Recomendación:**")
+                st.info(rec_text)
+
+                # Hierarchical navigation tabs
+                tab = st.segmented_control(
+                    "Nivel de análisis:",
+                    ["📝 Párrafos", "💬 Oraciones"],
+                    selection_mode="single",
+                    default="💬 Oraciones",
+                    key="hierarchy_tabs"
                 )
 
-                if selected_rec_code:
-                    rec_data = high_quality_sentences[
-                        high_quality_sentences['recommendation_code'] == selected_rec_code].copy()
+                # TAB 1: PARAGRAPH LEVEL
+                if tab == "📝 Párrafos":
+                    st.markdown("**Análisis por Párrafos:**")
 
-                    # Show recommendation text
-                    rec_text = rec_data['recommendation_text'].iloc[0]
-                    st.markdown("**Texto de la Recomendación:**")
-                    st.info(rec_text)
+                    # Group by paragraph and calculate paragraph-level similarity
+                    paragraph_analysis = rec_data.groupby(['paragraph_id', 'paragraph_text']).agg({
+                        'paragraph_similarity': 'first',
+                        'page_number': 'first',
+                        'sentence_similarity': ['count', 'mean', 'max'],
+                        'predicted_class': lambda x: x.mode()[0] if not x.empty else 'N/A'
+                    }).reset_index()
 
-                    # Hierarchical navigation tabs
-                    tab = st.segmented_control(
-                        "Nivel de análisis:",
-                        ["📝 Párrafos", "💬 Oraciones"],
-                        selection_mode="single",
-                        default="💬 Oraciones",
-                        key="hierarchy_tabs"
-                    )
+                    paragraph_analysis.columns = ['ID_Párrafo', 'Texto_Párrafo', 'Similitud_Párrafo', 'Página',
+                                                  'Num_Oraciones', 'Similitud_Prom', 'Similitud_Max',
+                                                  'Clasificación_ML']
+                    paragraph_analysis = paragraph_analysis.sort_values('Similitud_Prom', ascending=False)
 
-                    # TAB 1: PARAGRAPH LEVEL
-                    if tab == "📝 Párrafos":
-                        st.markdown("**Análisis por Párrafos:**")
+                    # PAGINATION FOR PARAGRAPHS
+                    coincidencias_por_pagina = 5
+                    total_coincidencias = len(paragraph_analysis)
+                    total_paginas = max(1, (total_coincidencias - 1) // coincidencias_por_pagina + 1)
 
-                        # Group by paragraph and calculate paragraph-level similarity
-                        paragraph_analysis = rec_data.groupby(['paragraph_id', 'paragraph_text']).agg({
-                            'paragraph_similarity': 'first',
-                            'page_number': 'first',
-                            'sentence_similarity': ['count', 'mean', 'max'],
-                            'predicted_class': lambda x: x.mode()[0] if not x.empty else 'N/A'
-                        }).reset_index()
+                    # Initialize current page for this recommendation's paragraphs
+                    pagina_key = f'pagina_actual_coincidencias_{selected_rec_code}_parrafos'
+                    if pagina_key not in st.session_state:
+                        st.session_state[pagina_key] = 1
 
-                        paragraph_analysis.columns = ['ID_Párrafo', 'Texto_Párrafo', 'Similitud_Párrafo', 'Página',
-                                                      'Num_Oraciones', 'Similitud_Prom', 'Similitud_Max',
-                                                      'Clasificación_ML']
-                        paragraph_analysis = paragraph_analysis.sort_values('Similitud_Prom', ascending=False)
+                    # Validate current page doesn't exceed total
+                    if st.session_state[pagina_key] > total_paginas:
+                        st.session_state[pagina_key] = 1
 
-                        for idx, row in paragraph_analysis.head(5).iterrows():
-                            with st.expander(f"Párrafo {row['ID_Párrafo']} - Similitud Promedio: {row['Similitud_Prom']:.3f}",
-                                             expanded=idx < 2):
-                                col1, col2 = st.columns([3, 1])
+                    pagina_actual = st.session_state[pagina_key]
 
-                                with col1:
-                                    st.write("**Contenido del Párrafo:**")
-                                    # Truncate very long text
-                                    para_text = row['Texto_Párrafo'][:800] + "..." if len(
-                                        row['Texto_Párrafo']) > 800 else row['Texto_Párrafo']
-                                    st.write(para_text)
+                    # Apply pagination
+                    inicio = (pagina_actual - 1) * coincidencias_por_pagina
+                    fin = inicio + coincidencias_por_pagina
+                    paragraph_analysis_paginado = paragraph_analysis.iloc[inicio:fin]
 
-                                with col2:
-                                    st.write("**Métricas:**")
-                                    st.write(f"**ID Página:** {row['Página']}")
-                                    st.write(f"**ID Párrafo:** {row['ID_Párrafo']}")
-                                    st.write(f"**Similitud Párrafo:** {row['Similitud_Párrafo']:.3f}")
+                    # Store in session state for pagination controls
+                    st.session_state[f'total_paginas_coincidencias_{selected_rec_code}_parrafos'] = total_paginas
 
-                    # TAB 2: SENTENCE LEVEL
-                    else:  # "💬 Oraciones"
-                        st.markdown("**Análisis por Oraciones:**")
+                    # Show pagination info
+                    st.write(
+                        f"📋 Mostrando {len(paragraph_analysis_paginado)} de {total_coincidencias} párrafos (Página {pagina_actual} de {total_paginas})")
 
-                        sentence_analysis = rec_data.sort_values('sentence_similarity', ascending=False)
+                    # Show paginated paragraphs
+                    for idx, row in paragraph_analysis_paginado.iterrows():
+                        with st.expander(
+                                f"Párrafo {row['ID_Párrafo']} - Similitud Promedio: {row['Similitud_Prom']:.3f}",
+                                expanded=idx == paragraph_analysis_paginado.index[0]):  # Only first expanded
+                            col1, col2 = st.columns([3, 1])
 
-                        for idx, (_, row) in enumerate(sentence_analysis.head(5).iterrows()):
-                            sentence_id = row.get('sentence_id_paragraph', f'S{idx + 1}')
+                            with col1:
+                                st.write("**Contenido del Párrafo:**")
+                                # Truncate very long text
+                                para_text = row['Texto_Párrafo'][:800] + "..." if len(
+                                    row['Texto_Párrafo']) > 800 else row['Texto_Párrafo']
+                                st.write(para_text)
 
-                            with st.expander(f"Oración {sentence_id} - Similitud: {row['sentence_similarity']:.3f}",
-                                             expanded=idx < 2):
-                                col1, col2 = st.columns([3, 1])
+                            with col2:
+                                st.write("**Métricas:**")
+                                st.write(f"**ID Página:** {row['Página']}")
+                                st.write(f"**ID Párrafo:** {row['ID_Párrafo']}")
+                                st.write(f"**Similitud Párrafo:** {row['Similitud_Párrafo']:.3f}")
 
-                                with col1:
-                                    st.write("**Contenido:**")
-                                    st.write(row['sentence_text'])
+                    # Show pagination controls for paragraphs
+                    if total_paginas > 1:
+                        st.markdown("---")
+                        col1, col2, col3 = st.columns([1, 2, 1])
+                        with col2:
+                            cols = st.columns([1, 1, 3, 1, 1])
 
-                                with col2:
-                                    st.write("**Métricas:**")
-                                    if 'sentence_id' in row and pd.notna(row['sentence_id']):
-                                        st.write(f"**ID Oración:** {row['sentence_id']}")
-                                    st.write(f"**ID Página:** {row['page_number']}")
-                                    st.write(f"**ID Párrafo:** {row.get('paragraph_id', 'N/A')}")
-                                    st.write(f"**Similitud Oración:** {row['sentence_similarity']:.3f}")
-                                    st.write(f"**Clasificación ML:** {row['predicted_class']}")
-            else:
-                st.info("No hay recomendaciones disponibles con el filtro actual.")
+                            with cols[0]:
+                                if st.button("◀", disabled=(pagina_actual <= 1),
+                                             key=f"prev_page_parrafos_{selected_rec_code}"):
+                                    st.session_state[pagina_key] = max(1, pagina_actual - 1)
+                                    st.rerun()
 
+                            with cols[2]:
+                                paginas_a_mostrar = []
+                                if total_paginas <= 5:
+                                    paginas_a_mostrar = list(range(1, total_paginas + 1))
+                                else:
+                                    if pagina_actual <= 3:
+                                        paginas_a_mostrar = [1, 2, 3, 4, 5]
+                                    elif pagina_actual >= total_paginas - 2:
+                                        paginas_a_mostrar = list(range(total_paginas - 4, total_paginas + 1))
+                                    else:
+                                        paginas_a_mostrar = list(range(pagina_actual - 2, pagina_actual + 3))
+
+                                mini_cols = st.columns(len(paginas_a_mostrar))
+                                for i, pagina in enumerate(paginas_a_mostrar):
+                                    with mini_cols[i]:
+                                        if pagina == pagina_actual:
+                                            st.markdown(
+                                                f"<div style='background: #007bff; color: white; text-align: center; padding: 4px; border-radius: 4px; margin: 2px;'>{pagina}</div>",
+                                                unsafe_allow_html=True)
+                                        else:
+                                            if st.button(str(pagina),
+                                                         key=f"page_parrafos_{selected_rec_code}_{pagina}"):
+                                                st.session_state[pagina_key] = pagina
+                                                st.rerun()
+
+                            with cols[4]:
+                                if st.button("▶", disabled=(pagina_actual >= total_paginas),
+                                             key=f"next_page_parrafos_{selected_rec_code}"):
+                                    st.session_state[pagina_key] = min(total_paginas, pagina_actual + 1)
+                                    st.rerun()
+
+                # TAB 2: SENTENCE LEVEL
+                else:  # "💬 Oraciones"
+                    st.markdown("**Análisis por Oraciones:**")
+
+                    sentence_analysis = rec_data.sort_values('sentence_similarity', ascending=False)
+
+                    # PAGINATION FOR SENTENCES
+                    coincidencias_por_pagina = 5
+                    total_coincidencias = len(sentence_analysis)
+                    total_paginas = max(1, (total_coincidencias - 1) // coincidencias_por_pagina + 1)
+
+                    # Initialize current page for this recommendation's sentences
+                    pagina_key = f'pagina_actual_coincidencias_{selected_rec_code}_oraciones'
+                    if pagina_key not in st.session_state:
+                        st.session_state[pagina_key] = 1
+
+                    # Validate current page doesn't exceed total
+                    if st.session_state[pagina_key] > total_paginas:
+                        st.session_state[pagina_key] = 1
+
+                    pagina_actual = st.session_state[pagina_key]
+
+                    # Apply pagination
+                    inicio = (pagina_actual - 1) * coincidencias_por_pagina
+                    fin = inicio + coincidencias_por_pagina
+                    sentence_analysis_paginado = sentence_analysis.iloc[inicio:fin]
+
+                    # Show pagination info
+                    st.write(
+                        f"📋 Mostrando {len(sentence_analysis_paginado)} de {total_coincidencias} oraciones (Página {pagina_actual} de {total_paginas})")
+
+                    # Show paginated sentences
+                    for idx, (_, row) in enumerate(sentence_analysis_paginado.iterrows()):
+                        sentence_id = row.get('sentence_id_paragraph', f'S{idx + 1}')
+
+                        with st.expander(f"Oración {sentence_id} - Similitud: {row['sentence_similarity']:.3f}",
+                                         expanded=idx == 0):  # Only first expanded
+                            col1, col2 = st.columns([3, 1])
+
+                            with col1:
+                                st.write("**Contenido:**")
+                                st.write(row['sentence_text'])
+
+                            with col2:
+                                st.write("**Métricas:**")
+                                if 'sentence_id' in row and pd.notna(row['sentence_id']):
+                                    st.write(f"**ID Oración:** {row['sentence_id']}")
+                                st.write(f"**ID Página:** {row['page_number']}")
+                                st.write(f"**ID Párrafo:** {row.get('paragraph_id', 'N/A')}")
+                                st.write(f"**Similitud Oración:** {row['sentence_similarity']:.3f}")
+                                st.write(f"**Clasificación ML:** {row['predicted_class']}")
+
+                    # Show pagination controls for sentences
+                    if total_paginas > 1:
+                        st.markdown("---")
+                        col1, col2, col3 = st.columns([1, 2, 1])
+                        with col2:
+                            cols = st.columns([1, 1, 3, 1, 1])
+
+                            with cols[0]:
+                                if st.button("◀", disabled=(pagina_actual <= 1),
+                                             key=f"prev_page_oraciones_{selected_rec_code}"):
+                                    st.session_state[pagina_key] = max(1, pagina_actual - 1)
+                                    st.rerun()
+
+                            with cols[2]:
+                                paginas_a_mostrar = []
+                                if total_paginas <= 5:
+                                    paginas_a_mostrar = list(range(1, total_paginas + 1))
+                                else:
+                                    if pagina_actual <= 3:
+                                        paginas_a_mostrar = [1, 2, 3, 4, 5]
+                                    elif pagina_actual >= total_paginas - 2:
+                                        paginas_a_mostrar = list(range(total_paginas - 4, total_paginas + 1))
+                                    else:
+                                        paginas_a_mostrar = list(range(pagina_actual - 2, pagina_actual + 3))
+
+                                mini_cols = st.columns(len(paginas_a_mostrar))
+                                for i, pagina in enumerate(paginas_a_mostrar):
+                                    with mini_cols[i]:
+                                        if pagina == pagina_actual:
+                                            st.markdown(
+                                                f"<div style='background: #007bff; color: white; text-align: center; padding: 4px; border-radius: 4px; margin: 2px;'>{pagina}</div>",
+                                                unsafe_allow_html=True)
+                                        else:
+                                            if st.button(str(pagina),
+                                                         key=f"page_oraciones_{selected_rec_code}_{pagina}"):
+                                                st.session_state[pagina_key] = pagina
+                                                st.rerun()
+
+                            with cols[4]:
+                                if st.button("▶", disabled=(pagina_actual >= total_paginas),
+                                             key=f"next_page_oraciones_{selected_rec_code}"):
+                                    st.session_state[pagina_key] = min(total_paginas, pagina_actual + 1)
+                                    st.rerun()
+
+        else:
+            st.info("No hay recomendaciones disponibles con el filtro actual.")
 
     else:
         # VISTA COMPARATIVA - SOLO LAS MÉTRICAS GENERALES
@@ -458,133 +659,133 @@ def main():
 
         st.info("💡 Seleccione un municipio específico en la barra lateral para ver el reporte detallado.")
 
-        # ==================================================
-        # SECTION 4: RECOMMENDATIONS DICTIONARY
-        # ==================================================
+    # ==================================================
+    # SECTION 4: RECOMMENDATIONS DICTIONARY
+    # ==================================================
 
-        st.markdown("---")
-        st.markdown("### 📖 Diccionario de Recomendaciones")
+    st.markdown("---")
+    st.markdown("### 📖 Diccionario de Recomendaciones")
 
-        # Create recommendations dictionary from available data
-        if selected_municipality != 'Todos':
-            # Use filtered data for specific municipality
-            dict_data = filtered_df
-        else:
-            # Use all data if viewing comparative mode
-            dict_data = df
-            if include_policy_only:
-                dict_data = dict_data[
-                    (dict_data['predicted_class'] == 'Incluida') |
-                    ((dict_data['predicted_class'] == 'Excluida') & (dict_data['prediction_confidence'] < 0.8))
-                    ]
+    # Create recommendations dictionary from available data
+    if selected_municipality != 'Todos':
+        # Use filtered data for specific municipality
+        dict_data = filtered_df
+    else:
+        # Use all data if viewing comparative mode
+        dict_data = df
+        if include_policy_only:
+            dict_data = dict_data[
+                (dict_data['predicted_class'] == 'Incluida') |
+                ((dict_data['predicted_class'] == 'Excluida') & (dict_data['prediction_confidence'] < 0.8))
+                ]
 
-        # Get unique recommendations with their details
-        recommendations_dict = dict_data.groupby('recommendation_code').agg({
-            'recommendation_text': 'first',
-            'recommendation_topic': 'first',
-            'recommendation_priority': 'first',
-            'sentence_similarity': ['count', 'mean', 'max'],
-            'mpio': lambda x: x.nunique() if selected_municipality == 'Todos' else x.iloc[0]
-        }).reset_index()
+    # Get unique recommendations with their details
+    recommendations_dict = dict_data.groupby('recommendation_code').agg({
+        'recommendation_text': 'first',
+        'recommendation_topic': 'first',
+        'recommendation_priority': 'first',
+        'sentence_similarity': ['count', 'mean', 'max'],
+        'mpio': lambda x: x.nunique() if selected_municipality == 'Todos' else x.iloc[0]
+    }).reset_index()
 
-        recommendations_dict.columns = ['Código', 'Texto', 'Tema', 'Priorizado_GN', 'Total_Menciones',
-                                        'Similitud_Promedio', 'Similitud_Máxima', 'Municipios_Implementan']
-        recommendations_dict = recommendations_dict.sort_values('Código')
+    recommendations_dict.columns = ['Código', 'Texto', 'Tema', 'Priorizado_GN', 'Total_Menciones',
+                                    'Similitud_Promedio', 'Similitud_Máxima', 'Municipios_Implementan']
+    recommendations_dict = recommendations_dict.sort_values('Código')
 
 
-        # Get unique recommendations with their details
-        recommendations_dict = dict_data.groupby('recommendation_code').agg({
-            'recommendation_text': 'first',
-            'recommendation_topic': 'first',
-            'recommendation_priority': 'first',
-            'sentence_similarity': ['count', 'mean', 'max'],
-            'mpio': lambda x: x.nunique() if selected_municipality == 'Todos' else x.iloc[0]
-        }).reset_index()
+    # Get unique recommendations with their details
+    recommendations_dict = dict_data.groupby('recommendation_code').agg({
+        'recommendation_text': 'first',
+        'recommendation_topic': 'first',
+        'recommendation_priority': 'first',
+        'sentence_similarity': ['count', 'mean', 'max'],
+        'mpio': lambda x: x.nunique() if selected_municipality == 'Todos' else x.iloc[0]
+    }).reset_index()
 
-        recommendations_dict.columns = ['Código', 'Texto', 'Tema', 'Priorizado_GN', 'Total_Menciones',
-                                        'Similitud_Promedio', 'Similitud_Máxima', 'Municipios_Implementan']
-        recommendations_dict = recommendations_dict.sort_values('Código')
+    recommendations_dict.columns = ['Código', 'Texto', 'Tema', 'Priorizado_GN', 'Total_Menciones',
+                                    'Similitud_Promedio', 'Similitud_Máxima', 'Municipios_Implementan']
+    recommendations_dict = recommendations_dict.sort_values('Código')
 
-        # Search and filter options
-        col1, col2, col3 = st.columns([2, 1, 1])
+    # Search and filter options
+    col1, col2, col3 = st.columns([2, 1, 1])
 
-        with col1:
-            search_term = st.text_input(
-                "🔍 Buscar recomendación:",
-                placeholder="Ingrese código o palabras clave...",
-                help="Busque por código de recomendación o palabras en el texto"
-            )
+    with col1:
+        search_term = st.text_input(
+            "🔍 Buscar recomendación:",
+            placeholder="Ingrese código o palabras clave...",
+            help="Busque por código de recomendación o palabras en el texto"
+        )
 
-        with col2:
-            if 'recommendation_topic' in dict_data.columns:
-                available_topics = ['Todos'] + sorted(
-                    dict_data['recommendation_topic'].dropna().unique().tolist())
-                selected_topic = st.selectbox(
-                    "Filtrar por tema:",
-                    options=available_topics,
-                    index=0
-                )
-            else:
-                selected_topic = 'Todos'
-
-        with col3:
-            priority_filter = st.selectbox(
-                "Prioridad GN:",
-                options=['Todos', 'Solo priorizadas', 'Solo no priorizadas'],
+    with col2:
+        if 'recommendation_topic' in dict_data.columns:
+            available_topics = ['Todos'] + sorted(
+                dict_data['recommendation_topic'].dropna().unique().tolist())
+            selected_topic = st.selectbox(
+                "Filtrar por tema:",
+                options=available_topics,
                 index=0
             )
-
-        # Apply filters
-        filtered_dict = recommendations_dict.copy()
-
-        if search_term:
-            mask = (
-                    filtered_dict['Código'].str.contains(search_term, case=False, na=False) |
-                    filtered_dict['Texto'].str.contains(search_term, case=False, na=False)
-            )
-            filtered_dict = filtered_dict[mask]
-
-        if selected_topic != 'Todos':
-            filtered_dict = filtered_dict[filtered_dict['Tema'] == selected_topic]
-
-        if priority_filter == 'Solo priorizadas':
-            filtered_dict = filtered_dict[filtered_dict['Priorizado_GN'] == 1]
-        elif priority_filter == 'Solo no priorizadas':
-            filtered_dict = filtered_dict[filtered_dict['Priorizado_GN'] == 0]
-
-        # Display results count
-        st.markdown(f"**Mostrando {len(filtered_dict)} de {len(recommendations_dict)} recomendaciones**")
-
-        # Display recommendations
-        if not filtered_dict.empty:
-            for idx, row in filtered_dict.iterrows():
-                with st.expander(f"**{row['Código']}** - {row['Texto'][:80]}...", expanded=False):
-                    col1, col2 = st.columns([3, 1])
-
-                    with col1:
-                        st.markdown("**Descripción completa:**")
-                        st.write(row['Texto'])
-
-                        if pd.notna(row['Tema']):
-                            st.markdown(f"**Tema:** {row['Tema']}")
-
-                    with col2:
-                        st.markdown("**Información:**")
-                        st.write(f"**Código:** {row['Código']}")
-
-                        if pd.notna(row['Priorizado_GN']):
-                            priority_text = "Sí" if row['Priorizado_GN'] == 1 else "No"
-                            priority_color = "🔴" if row['Priorizado_GN'] == 1 else "⚪"
-                            st.write(f"**Priorizado por GN:** {priority_color} {priority_text}")
-
-                        st.markdown("**Estadísticas:**")
-                        if selected_municipality == 'Todos':
-                            st.write(f"**Municipios que implementan:** {row['Municipios_Implementan']}")
-                        st.write(f"**Total menciones:** {row['Total_Menciones']}")
-                        st.write(f"**Similitud promedio:** {row['Similitud_Promedio']:.3f}")
-                        st.write(f"**Similitud máxima:** {row['Similitud_Máxima']:.3f}")
         else:
-            st.info("No se encontraron recomendaciones que coincidan con los criterios de búsqueda.")
+            selected_topic = 'Todos'
+
+    with col3:
+        priority_filter = st.selectbox(
+            "Prioridad GN:",
+            options=['Todos', 'Solo priorizadas', 'Solo no priorizadas'],
+            index=0
+        )
+
+    # Apply filters
+    filtered_dict = recommendations_dict.copy()
+
+    if search_term:
+        mask = (
+                filtered_dict['Código'].str.contains(search_term, case=False, na=False) |
+                filtered_dict['Texto'].str.contains(search_term, case=False, na=False)
+        )
+        filtered_dict = filtered_dict[mask]
+
+    if selected_topic != 'Todos':
+        filtered_dict = filtered_dict[filtered_dict['Tema'] == selected_topic]
+
+    if priority_filter == 'Solo priorizadas':
+        filtered_dict = filtered_dict[filtered_dict['Priorizado_GN'] == 1]
+    elif priority_filter == 'Solo no priorizadas':
+        filtered_dict = filtered_dict[filtered_dict['Priorizado_GN'] == 0]
+
+    # Display results count
+    st.markdown(f"**Mostrando {len(filtered_dict)} de {len(recommendations_dict)} recomendaciones**")
+
+    # Display recommendations
+    if not filtered_dict.empty:
+        for idx, row in filtered_dict.iterrows():
+            with st.expander(f"**{row['Código']}** - {row['Texto'][:80]}...", expanded=False):
+                col1, col2 = st.columns([3, 1])
+
+                with col1:
+                    st.markdown("**Descripción completa:**")
+                    st.write(row['Texto'])
+
+                    if pd.notna(row['Tema']):
+                        st.markdown(f"**Tema:** {row['Tema']}")
+
+                with col2:
+                    st.markdown("**Información:**")
+                    st.write(f"**Código:** {row['Código']}")
+
+                    if pd.notna(row['Priorizado_GN']):
+                        priority_text = "Sí" if row['Priorizado_GN'] == 1 else "No"
+                        priority_color = "🔴" if row['Priorizado_GN'] == 1 else "⚪"
+                        st.write(f"**Priorizado por GN:** {priority_color} {priority_text}")
+
+                    st.markdown("**Estadísticas:**")
+                    if selected_municipality == 'Todos':
+                        st.write(f"**Municipios que implementan:** {row['Municipios_Implementan']}")
+                    st.write(f"**Total menciones:** {row['Total_Menciones']}")
+                    st.write(f"**Similitud promedio:** {row['Similitud_Promedio']:.3f}")
+                    st.write(f"**Similitud máxima:** {row['Similitud_Máxima']:.3f}")
+    else:
+        st.info("No se encontraron recomendaciones que coincidan con los criterios de búsqueda.")
 
 
 if __name__ == "__main__":
