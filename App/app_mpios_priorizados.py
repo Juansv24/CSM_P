@@ -18,10 +18,10 @@ st.set_page_config(
 def load_data():
     """Load the pickle file and return the DataFrame"""
     try:
-        df = pd.read_pickle('Data/Similitudes Jerárquicas Final Econ.pkl')
+        df = pd.read_pickle('Data/Similitudes Jerárquicas Final Econ 2.pkl')
         return df
     except FileNotFoundError:
-        st.error("Archivo no encontrado. Verifique que existe 'Data/Similitudes Jerárquicas Final Econ.pkl'")
+        st.error("Archivo no encontrado. Verifique que existe 'Data/Similitudes Jerárquicas Final Econ 2.pkl'")
         return None
     except Exception as e:
         st.error(f"Error cargando datos: {str(e)}")

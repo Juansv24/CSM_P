@@ -1,6 +1,3 @@
-# Ignore all files and folders within the "Data" folder
-/Data/**
-
 # Ignore all files and folders within the "PTT" folder
 /PDT/**
 
