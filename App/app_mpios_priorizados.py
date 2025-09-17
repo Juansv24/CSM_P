@@ -234,7 +234,7 @@ def main():
             st.markdown(f"""
                 <div style="background-color: #f8f9fa; padding: 1rem; border-radius: 10px; text-align: center; border-left: 4px solid #17a2b8;">
                     <h4 style="margin: 0; color: #6c757d;">Categoría IICA 
-                        <span title="Índice de Incidencia del Conflicto Armado: Clasifica municipios según la incidencia del conflicto, tiene en cuenta dimensiones como acciones armadas, desplazamiento, cultivos de coca, entre otros. Para más información visitar https://colaboracion.dnp.gov.co/CDT/Poltica%20de%20Vctimas/Documento_indice_Incidencia_del_Conflicto_Armado_%20IICA_2019.pdf" 
+                        <span title="Índice de Incidencia del Conflicto Armado: Clasifica municipios según la incidencia del conflicto, incluye variables asociadas al conflicto como acciones armadas, desplazamiento, cultivos de coca y homicidios. Agrupa a los municipios en 5 categorías desde baja incidencia hasta muy alta incidencia del conflicto armado." 
                               style="cursor: help; color: #007bff;">ⓘ</span>
                     </h4>
                     <h3 style="margin: 0.5rem 0 0 0; color: #333;">{iica_cat if pd.notna(iica_cat) else 'N/A'}</h3>
@@ -246,7 +246,7 @@ def main():
             st.markdown(f"""
                 <div style="background-color: #f8f9fa; padding: 1rem; border-radius: 10px; text-align: center; border-left: 4px solid #ffc107;">
                     <h4 style="margin: 0; color: #6c757d;">Grupo MDM 
-                        <span title="Grupo de Capacidades Iniciales de la Medición de Desempeño Municipal: Las capacidades iniciales se definen como el nivel de recursos y las condiciones del municipio que delimitan el alcance de la gestión y la provisión de bienes y servicios. Para más información visitar https://colaboracion.dnp.gov.co/CDT/Desarrollo%20Territorial/MDM/Informe%20ajuste%20clasificacio%CC%81n.pdf" 
+                        <span title="Grupo de Capacidades Iniciales de la Medición de Desempeño Municipal: Las capacidades iniciales determinan el contexto económico, urbano y de recursos del municipio. Agrupa a los municipios en 6 categorías de desarrollo siendo C (capitales) los de mayores capacidades iniciales, seguido de G1, G2, y así sucesivamente hasta G5, siendo estos los de menores capacidades iniciales." 
                               style="cursor: help; color: #007bff;">ⓘ</span>
                     </h4>
                     <h3 style="margin: 0.5rem 0 0 0; color: #333;">{mdm_group if pd.notna(mdm_group) else 'N/A'}</h3>
