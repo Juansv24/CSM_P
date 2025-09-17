@@ -4,6 +4,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
 
 # Configure the page
 st.set_page_config(
@@ -84,6 +87,126 @@ def load_data():
         st.error(f"Error cargando datos: {str(e)}")
         return None
 
+def create_variable_dictionary():
+    """Crear diccionario de variables del dataset"""
+    dictionary = {
+        'Variable': [
+            'mpio', 'dpto', 'recommendation_code', 'recommendation_text',
+            'recommendation_topic', 'recommendation_priority', 'sentence_text',
+            'sentence_similarity', 'paragraph_text', 'paragraph_similarity',
+            'paragraph_id', 'page_number', 'predicted_class', 'prediction_confidence',
+            'IPM_2018', 'PDET', 'Cat_IICA', 'Grupo_MDM', 'sentence_id', 'sentence_id_paragraph'
+        ],
+        'Descripción': [
+            'Nombre del municipio',
+            'Nombre del departamento',
+            'Código único de la recomendación',
+            'Texto completo de la recomendación',
+            'Tema o categoría de la recomendación',
+            'Indicador numérico de priorización (0=No, 1=Sí)',
+            'Texto de la oración del PDD municipal',
+            'Similitud semántica entre oración y recomendación (0-1)',
+            'Texto completo del párrafo que contiene la oración',
+            'Similitud semántica entre párrafo y recomendación (0-1)',
+            'Identificador único del párrafo',
+            'Número de página del documento donde aparece el texto',
+            'Clasificación de ML: Incluida/Excluida como política pública',
+            'Confianza del modelo de clasificación (0-1)',
+            'Índice de Pobreza Multidimensional 2018',
+            'Indicador PDET - Programa de Desarrollo con Enfoque Territorial (0=No, 1=Sí)',
+            'Categoría del Índice de Incidencia del Conflicto Armado',
+            'Grupo de Capacidades Iniciales - Medición de Desempeño Municipal',
+            'Identificador de oración en el documento',
+            'Identificador de oración dentro del párrafo'
+        ]
+    }
+    return pd.DataFrame(dictionary)
+
+def create_ranking_data(df, sentence_threshold, include_policy_only):
+    """Crear datos de ranking de municipios"""
+    ranking_data = df.copy()
+
+    # Aplicar filtro de política si está activado
+    if include_policy_only:
+        ranking_data = ranking_data[
+            (ranking_data['predicted_class'] == 'Incluida') |
+            ((ranking_data['predicted_class'] == 'Excluida') & (ranking_data['prediction_confidence'] < 0.8))
+            ]
+
+    # Calcular ranking
+    ranking_data = ranking_data.groupby(['mpio', 'dpto']).agg({
+        'recommendation_code': lambda x: len(set(x[df.loc[x.index, 'sentence_similarity'] >= sentence_threshold])),
+        'sentence_similarity': ['count', 'mean'],
+        'IPM_2018': 'first',
+        'PDET': 'first',
+        'Cat_IICA': 'first',
+        'Grupo_MDM': 'first'
+    }).reset_index()
+
+    # Aplanar columnas
+    ranking_data.columns = ['Municipio', 'Departamento', 'Recomendaciones_Implementadas',
+                            'Total_Oraciones', 'Similitud_Promedio', 'IPM_2018', 'PDET',
+                            'Cat_IICA', 'Grupo_MDM']
+
+    # Ordenar por recomendaciones implementadas
+    ranking_data = ranking_data.sort_values('Recomendaciones_Implementadas', ascending=False)
+    ranking_data['Ranking'] = range(1, len(ranking_data) + 1)
+
+    # Reordenar columnas
+    ranking_data = ranking_data[['Ranking', 'Municipio', 'Departamento', 'Recomendaciones_Implementadas',
+                                 'Total_Oraciones', 'Similitud_Promedio', 'IPM_2018', 'PDET',
+                                 'Cat_IICA', 'Grupo_MDM']]
+
+    return ranking_data
+
+def create_excel_file(filtered_data, ranking_data, dictionary_df):
+    """Crear archivo Excel con ranking, datos filtrados y diccionario"""
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Pestaña 1: Ranking de municipios
+        ranking_data.to_excel(writer, sheet_name='Ranking_Municipios', index=False)
+
+        # Pestaña 2: Datos filtrados
+        filtered_data.to_excel(writer, sheet_name='Datos_Filtrados', index=False)
+
+        # Pestaña 3: Diccionario
+        dictionary_df.to_excel(writer, sheet_name='Diccionario_Variables', index=False)
+
+        # Formatear hojas
+        workbook = writer.book
+        header_fill = PatternFill(start_color='1f77b4', end_color='1f77b4', fill_type='solid')
+        header_font = Font(color='FFFFFF', bold=True)
+
+        # Formatear todas las hojas
+        for sheet_name in ['Ranking_Municipios', 'Datos_Filtrados', 'Diccionario_Variables']:
+            worksheet = writer.sheets[sheet_name]
+            for cell in worksheet[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal='center')
+
+        # Ajustar ancho de columnas específicas
+        # Ranking
+        ranking_sheet = writer.sheets['Ranking_Municipios']
+        ranking_sheet.column_dimensions['A'].width = 25  # Municipio
+        ranking_sheet.column_dimensions['B'].width = 20  # Departamento
+
+        # Diccionario
+        dict_sheet = writer.sheets['Diccionario_Variables']
+        dict_sheet.column_dimensions['A'].width = 25
+        dict_sheet.column_dimensions['B'].width = 80
+
+    output.seek(0)
+    return output
+
+def to_csv_utf8_bom(df):
+    """Convertir DataFrame a CSV con codificación UTF-8 BOM"""
+    # Crear CSV como string
+    csv_string = df.to_csv(index=False, encoding='utf-8')
+    # Agregar BOM (Byte Order Mark) para UTF-8
+    csv_bytes = '\ufeff' + csv_string
+    return csv_bytes.encode('utf-8')
 
 def main():
     """Main function to run the Streamlit app"""
@@ -151,8 +274,68 @@ def main():
     if selected_municipality != 'Todos':
         filtered_df = filtered_df[filtered_df['mpio'] == selected_municipality]
 
-    # Apply sentence similarity filter (LAST)
+    # Apply sentence similarity filter
     high_quality_sentences = filtered_df[filtered_df['sentence_similarity'] >= sentence_threshold]
+
+    # Apply sentence similarity filter
+    high_quality_sentences = filtered_df[filtered_df['sentence_similarity'] >= sentence_threshold]
+
+    # SISTEMA DE DESCARGA
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📥 Descargar Datos")
+
+    # Botón 1: Preparar descarga
+    if st.sidebar.button("📊 Preparar Descarga Excel", use_container_width=True):
+        with st.spinner("Generando archivo Excel con 3 pestañas..."):
+            try:
+                # Crear ranking
+                ranking_data = create_ranking_data(df, sentence_threshold, include_policy_only)
+
+                # Crear diccionario
+                dict_df = create_variable_dictionary()
+
+                # Generar archivo Excel
+                excel_file = create_excel_file(high_quality_sentences, ranking_data, dict_df)
+
+                # Guardar en session state
+                st.session_state['excel_ready'] = excel_file
+                st.session_state['umbral_usado'] = sentence_threshold
+                st.session_state['total_registros'] = len(high_quality_sentences)
+
+                st.sidebar.success(f"¡Archivo listo! ({len(high_quality_sentences)} registros filtrados)")
+
+            except Exception as e:
+                st.sidebar.error(f"Error generando archivo: {str(e)}")
+
+    # Botón 2: Descargar (solo aparece si está listo)
+    if 'excel_ready' in st.session_state:
+        from datetime import datetime
+        fecha_actual = datetime.now().strftime("%Y%m%d_%H%M")
+        umbral = st.session_state.get('umbral_usado', sentence_threshold)
+        total_registros = st.session_state.get('total_registros', 0)
+
+        st.sidebar.download_button(
+            label=f"⬇️ Descargar Excel ({total_registros} registros)",
+            data=st.session_state['excel_ready'],
+            file_name=f"Reporte_Municipios_Umbral_{umbral}_{fecha_actual}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            help=f"Excel con ranking, datos filtrados (umbral ≥ {umbral}) y diccionario"
+        )
+
+        # Botón para limpiar y preparar nueva descarga
+        if st.sidebar.button("🔄 Preparar Nueva Descarga", use_container_width=True):
+            if 'excel_ready' in st.session_state:
+                del st.session_state['excel_ready']
+            if 'umbral_usado' in st.session_state:
+                del st.session_state['umbral_usado']
+            if 'total_registros' in st.session_state:
+                del st.session_state['total_registros']
+            st.rerun()
+
+    # Mostrar info si no hay datos
+    if high_quality_sentences.empty:
+        st.sidebar.info("No hay datos para descargar con el filtro actual")
 
     # ==================================================
     # HEADER SECTION - PDF Style
@@ -315,7 +498,7 @@ def main():
         with col3:
             st.markdown(f"""
                 <div style="background-color: #e8f5e8; padding: 1.5rem; border-radius: 10px; text-align: center;">
-                    <h2 style="margin: 0; color: #388e3c; font-size: 2.5rem;">{priority_implemented}</h2>
+                    <h2 style="margin: 0; color: #388e3c; font-size: 2.5rem;">{priority_implemented}/45</h2>
                     <p style="margin: 0.5rem 0 0 0; color: #388e3c; font-weight: 500;">Prioritarias Implementadas</p>
                 </div>
                 """, unsafe_allow_html=True)
@@ -325,7 +508,32 @@ def main():
         st.markdown(" ")
 
         if not high_quality_sentences.empty:
-            st.markdown("### Top 5 Recomendaciones más Frecuentes")
+            # Header con botón de descarga
+            col_header, col_download = st.columns([4, 1])
+            with col_header:
+                st.markdown("### Top 5 Recomendaciones más Frecuentes")
+            with col_download:
+                # Botón minimalista de descarga
+                st.markdown("""
+                <style>
+                .download-btn {
+                    background: none;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 6px;
+                    padding: 4px 8px;
+                    font-size: 12px;
+                    color: #666;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+                .download-btn:hover {
+                    background: #f8f9fa;
+                    border-color: #007bff;
+                    color: #007bff;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+
             freq_analysis = high_quality_sentences.groupby('recommendation_code').agg({
                 'sentence_similarity': 'count',
                 'recommendation_text': 'first'
@@ -334,6 +542,18 @@ def main():
             freq_analysis = freq_analysis.sort_values('Frecuencia', ascending=False).head(5)
 
             if not freq_analysis.empty:
+                with col_download:
+                    csv_freq = to_csv_utf8_bom(freq_analysis)
+                    st.download_button(
+                        label="📄 Descargar",
+                        data=csv_freq,
+                        file_name="top_5_recomendaciones_frecuentes.csv",
+                        mime="text/csv; charset=utf-8",
+                        help="Descargar datos del gráfico",
+                        use_container_width=True
+                    )
+
+                # Gráfico
                 fig_freq = px.bar(
                     freq_analysis,
                     x='Frecuencia',
@@ -354,7 +574,10 @@ def main():
 
         # Implementation Heatmap by Topic
         if not high_quality_sentences.empty and 'recommendation_topic' in high_quality_sentences.columns:
-            st.markdown("#### Implementación por Tema")
+            # Header con botón de descarga
+            col_header2, col_download2 = st.columns([4, 1])
+            with col_header2:
+                st.markdown("#### Implementación por Tema")
 
             topic_analysis = high_quality_sentences.groupby('recommendation_topic')[
                 'recommendation_code'].nunique().reset_index()
@@ -362,6 +585,18 @@ def main():
             topic_analysis = topic_analysis.sort_values('Recomendaciones_Implementadas', ascending=False)
 
             if not topic_analysis.empty:
+                with col_download2:
+                    csv_topics = to_csv_utf8_bom(topic_analysis)
+                    st.download_button(
+                        label="📄 Descargar",
+                        data=csv_topics,
+                        file_name="implementacion_por_tema.csv",
+                        mime="text/csv; charset=utf-8",
+                        help="Descargar datos del gráfico",
+                        use_container_width=True
+                    )
+
+                # Gráfico
                 fig_heatmap = px.bar(
                     topic_analysis,
                     x='Recomendaciones_Implementadas',
@@ -377,7 +612,7 @@ def main():
                     showlegend=False,
                     yaxis={'categoryorder': 'total ascending'},
                     margin=dict(l=150, r=50, t=80, b=50),
-                    coloraxis_showscale = False
+                    coloraxis_showscale=False
                 )
                 st.plotly_chart(fig_heatmap, use_container_width=True)
 
